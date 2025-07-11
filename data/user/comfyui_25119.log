@@ -1,0 +1,80 @@
+## ComfyUI-Manager: installing dependencies done.
+[2025-06-20 11:14:56.149] ** ComfyUI startup time: 2025-06-20 11:14:56.149
+[2025-06-20 11:14:56.150] ** Platform: Linux
+[2025-06-20 11:14:56.150] ** Python version: 3.10.14 (main, Mar 21 2024, 16:24:04) [GCC 11.2.0]
+[2025-06-20 11:14:56.150] ** Python executable: /opt/conda/bin/python3
+[2025-06-20 11:14:56.150] ** ComfyUI Path: /app
+[2025-06-20 11:14:56.150] ** ComfyUI Base Folder Path: /app
+[2025-06-20 11:14:56.150] ** User directory: /app/user
+[2025-06-20 11:14:56.150] ** ComfyUI-Manager config path: /app/user/default/ComfyUI-Manager/config.ini
+[2025-06-20 11:14:56.150] ** Log path: /app/user/comfyui.log
+
+Prestartup times for custom nodes:
+[2025-06-20 11:14:57.060]    3.3 seconds: /app/custom_nodes/ComfyUI-Manager
+[2025-06-20 11:14:57.060] 
+[2025-06-20 11:15:00.746] Warning, you are using an old pytorch version and some ckpt/pt files might be loaded unsafely. Upgrading to 2.4 or above is recommended.
+[2025-06-20 11:15:01.096] Total VRAM 40339 MB, total RAM 191859 MB
+[2025-06-20 11:15:01.096] pytorch version: 2.2.2
+[2025-06-20 11:15:03.948] xformers version: 0.0.26+cu118
+[2025-06-20 11:15:03.948] Set vram state to: NORMAL_VRAM
+[2025-06-20 11:15:03.948] Device: cuda:0 NVIDIA A100-PCIE-40GB : cudaMallocAsync
+[2025-06-20 11:15:04.786] Using xformers attention
+[2025-06-20 11:15:06.006] Python version: 3.10.14 (main, Mar 21 2024, 16:24:04) [GCC 11.2.0]
+[2025-06-20 11:15:06.006] ComfyUI version: 0.3.41
+[2025-06-20 11:15:06.011] ComfyUI frontend version: 1.22.2
+[2025-06-20 11:15:06.013] [Prompt Server] web root: /opt/conda/lib/python3.10/site-packages/comfyui_frontend_package/static
+[2025-06-20 11:15:07.074] ### Loading: ComfyUI-Manager (V3.33.1)
+[2025-06-20 11:15:07.074] [ComfyUI-Manager] network_mode: public
+[2025-06-20 11:15:07.086] ### ComfyUI Revision: UNKNOWN (The currently installed ComfyUI is not a Git repository)
+[2025-06-20 11:15:08.119] [ComfyUI-Manager] default cache updated: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/alter-list.json
+[2025-06-20 11:15:08.141] [ComfyUI-Manager] default cache updated: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/model-list.json
+[2025-06-20 11:15:08.248] [ComfyUI-Manager] default cache updated: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/github-stats.json
+[2025-06-20 11:15:08.308] [ComfyUI-Manager] default cache updated: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/custom-node-list.json
+[2025-06-20 11:15:08.348] [ComfyUI-Manager] default cache updated: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/extension-node-map.json
+[2025-06-20 11:15:08.872] No module named 'volcengine'
+[2025-06-20 11:15:08.920] [36;20m[/app/custom_nodes/comfyui_controlnet_aux] | INFO -> Using ckpts path: /app/custom_nodes/comfyui_controlnet_aux/ckpts[0m
+[2025-06-20 11:15:08.920] [36;20m[/app/custom_nodes/comfyui_controlnet_aux] | INFO -> Using symlinks: False[0m
+[2025-06-20 11:15:08.921] [36;20m[/app/custom_nodes/comfyui_controlnet_aux] | INFO -> Using ort providers: ['CUDAExecutionProvider', 'DirectMLExecutionProvider', 'OpenVINOExecutionProvider', 'ROCMExecutionProvider', 'CPUExecutionProvider', 'CoreMLExecutionProvider'][0m
+[2025-06-20 11:15:09.498] DWPose: Onnxruntime with acceleration providers detected
+[2025-06-20 11:15:09.534] 
+Import times for custom nodes:
+[2025-06-20 11:15:09.534]    0.0 seconds: /app/custom_nodes/websocket_image_save.py
+[2025-06-20 11:15:09.534]    0.0 seconds: /app/custom_nodes/sdxl_prompt_styler
+[2025-06-20 11:15:09.534]    0.0 seconds: /app/custom_nodes/ComfyUI_IPAdapter_plus
+[2025-06-20 11:15:09.534]    0.1 seconds: /app/custom_nodes/ComfyUI-Manager
+[2025-06-20 11:15:09.534]    0.6 seconds: /app/custom_nodes/comfyui_controlnet_aux
+[2025-06-20 11:15:09.534]    1.8 seconds: /app/custom_nodes/ComfyUI-utils-nodes
+[2025-06-20 11:15:09.534] 
+[2025-06-20 11:15:09.863] Context impl SQLiteImpl.
+[2025-06-20 11:15:09.863] Will assume non-transactional DDL.
+[2025-06-20 11:15:09.927] No target revision found.
+[2025-06-20 11:15:09.938] Starting server
+
+[2025-06-20 11:15:09.938] To see the GUI go to: http://0.0.0.0:25119
+[2025-06-20 11:15:12.991] FETCH ComfyRegistry Data: 5/89
+[2025-06-20 11:15:16.303] FETCH ComfyRegistry Data: 10/89
+[2025-06-20 11:15:19.523] FETCH ComfyRegistry Data: 15/89
+[2025-06-20 11:15:22.776] FETCH ComfyRegistry Data: 20/89
+[2025-06-20 11:15:26.009] FETCH ComfyRegistry Data: 25/89
+[2025-06-20 11:15:29.176] FETCH ComfyRegistry Data: 30/89
+[2025-06-20 11:15:32.408] FETCH ComfyRegistry Data: 35/89
+[2025-06-20 11:15:35.620] FETCH ComfyRegistry Data: 40/89
+[2025-06-20 11:15:38.843] FETCH ComfyRegistry Data: 45/89
+[2025-06-20 11:15:42.087] FETCH ComfyRegistry Data: 50/89
+[2025-06-20 11:15:45.314] FETCH ComfyRegistry Data: 55/89
+[2025-06-20 11:15:48.521] FETCH ComfyRegistry Data: 60/89
+[2025-06-20 11:15:51.781] FETCH ComfyRegistry Data: 65/89
+[2025-06-20 11:15:55.038] FETCH ComfyRegistry Data: 70/89
+[2025-06-20 11:15:58.260] FETCH ComfyRegistry Data: 75/89
+[2025-06-20 11:16:01.511] FETCH ComfyRegistry Data: 80/89
+[2025-06-20 11:16:04.771] FETCH ComfyRegistry Data: 85/89
+[2025-06-20 11:16:07.853] FETCH ComfyRegistry Data [DONE]
+[2025-06-20 11:16:07.972] [ComfyUI-Manager] default cache updated: https://api.comfy.org/nodes
+[2025-06-20 11:16:07.991] [ComfyUI Manager] unable to create file: /app/custom_nodes/ComfyUI-Manager/.git/.cnr-id
+[2025-06-20 11:16:07.991] [ComfyUI Manager] unable to create file: /app/custom_nodes/ComfyUI-utils-nodes/.git/.cnr-id
+[2025-06-20 11:16:07.992] [ComfyUI Manager] unable to create file: /app/custom_nodes/ComfyUI_IPAdapter_plus/.git/.cnr-id
+[2025-06-20 11:16:07.992] [ComfyUI Manager] unable to create file: /app/custom_nodes/comfyui_controlnet_aux/.git/.cnr-id
+[2025-06-20 11:16:07.992] [ComfyUI Manager] unable to create file: /app/custom_nodes/sdxl_prompt_styler/.git/.cnr-id
+[2025-06-20 11:16:07.992] FETCH DATA from: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/custom-node-list.json [DONE]
+[2025-06-20 11:16:08.162] [ComfyUI-Manager] All startup tasks have been completed.
+[2025-06-20 11:17:01.019] FETCH DATA from: /app/user/default/ComfyUI-Manager/cache/4245046894_model-list.json [DONE]

@@ -1,0 +1,40 @@
+<% require 'securerandom' %>
+<% password = SecureRandom.hex(12) %>
+<% host = `hostname`.strip %>
+
+batch_connect:
+  template: "basic"
+  conn_params:
+    - working_path
+
+script:
+  email_on_started: true
+  email_on_terminated: true
+  email: <%= ENV["USER"] %>@tufts.edu
+  before_script: "before.sh.erb"
+  script: "script.sh.erb"
+  job_name: "OnDemand/comfyui"
+  native:
+    - "--time"
+    - "<%= bc_num_hours %>:0:0"
+    - "-n"
+    - "<%= num_cores %>"
+    - "--mem"
+    - "<%= num_memory %>"
+    - "--nodes"
+    - "1"
+    - "-p"
+    - "<%= gpu_partition %>"
+    - "--exclude=p1cmp[090-109]"
+
+    <%- if gpu_type == "a100-80GB" -%>
+    - "--gres=gpu:a100:1"
+    - "--constraint=a100-80G"
+
+    <%- elsif gpu_type == "any" -%>
+    - "--gres=gpu:1"
+
+    <%- elsif gpu_partition == "preempt" || gpu_partition == "gpu" -%>
+    - "--gres=gpu:<%= gpu_type %>:1"
+
+    <%- end -%>

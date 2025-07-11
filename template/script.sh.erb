@@ -1,0 +1,135 @@
+#!/bin/bash
+# ================================
+# A robust script to start ComfyUI in a Singularity container,
+# combining user-provided logic with safety checks.
+# ================================
+set -euo pipefail
+
+# ================================
+# Configuration
+# ================================
+# These variables are intended to be replaced by a templating engine (e.g., Open OnDemand).
+MODELDIR="<%= context.modeldir %>"
+DATA_DIR="<%= context.datadir %>"
+VER="<%= context.version %>"
+COMFYUI_SIF="/cluster/tufts/ngc/images/comfyui_${VER}.sif"
+# The 'port' variable is assumed to be provided by the environment.
+COMFYUI_PORT=$port
+
+# --- Pre-flight Checks & Defaults ---
+# Trim whitespace and set a default DATA_DIR if it's empty or unset.
+if [ -z "$(echo "${DATA_DIR:-}" | xargs)" ]; then
+    echo "⚠️ DATA_DIR is not set or is empty, defaulting to '${HOME}/comfyui/data'"
+    DATA_DIR="${HOME}/comfyui/data"
+fi
+
+# Check that other critical variables are set.
+if [ -z "$MODELDIR" ]; then
+  echo "❌ Error: MODELDIR is not set. Please ensure 'context.modeldir' is provided."
+  exit 1
+fi
+if [ ! -f "$COMFYUI_SIF" ]; then
+  echo "❌ Error: Singularity image not found at $COMFYUI_SIF"
+  exit 1
+fi
+
+# ================================
+# Functions
+# ================================
+# Finds an available TCP port in the unassigned range.
+my_find_port() {
+    local host="127.0.0.1"
+    local min_port=49152
+    local max_port=65535
+
+    for port in $(shuf -i ${min_port}-${max_port}); do
+        # Check if port is available
+        if ! nc -z "$host" "$port" 2>/dev/null; then
+            echo "$port"
+            return 0
+        fi
+    done
+
+    echo "❌ Failed to find an available port in the range ${min_port}-${max_port}." >&2
+    return 1
+}
+
+# ================================
+# Environment Setup
+# ================================
+echo "▶️ Setting up environment..."
+module purge
+module load singularity
+echo "Currently Loaded Modules:"
+module list
+
+# If COMFYUI_PORT is not set, find one automatically.
+if [ -z "$COMFYUI_PORT" ]; then
+    echo "▶️ Port not specified, finding an available port..."
+    COMFYUI_PORT=$(my_find_port)
+    echo "✅ Found available port: $COMFYUI_PORT"
+fi
+
+# ================================
+# Directory Setup
+# ================================
+echo "▶️ Setting up directories in $DATA_DIR..."
+DATA_USER=$DATA_DIR/user
+DATA_CONFIG=$DATA_DIR/config
+DATA_TEMP=$DATA_DIR/temp
+DATA_OUTPUT=$DATA_DIR/output
+DATA_INPUT=$DATA_DIR/input
+DATA_CUSTOM_NODES=$DATA_DIR/custom_nodes
+
+# Create all necessary directories. This is the crucial fix.
+# The original error was caused by DATA_CUSTOM_NODES not being created before the mount attempt.
+mkdir -p "$DATA_USER"
+mkdir -p "$DATA_CONFIG"
+mkdir -p "$DATA_TEMP"
+mkdir -p "$DATA_OUTPUT"
+mkdir -p "$DATA_INPUT"
+mkdir -p "$DATA_CUSTOM_NODES"
+
+# ================================
+# Custom Nodes Setup
+# ================================
+# Copy the default custom_nodes only if the user's custom_nodes directory is empty.
+# This prevents overwriting user-installed nodes on subsequent runs.
+if [ -z "$(ls -A "$DATA_CUSTOM_NODES")" ]; then
+  echo "▶️ Custom nodes directory is empty. Copying default nodes..."
+  DEFAULT_NODES_SRC="/cluster/tufts/hpc/tools/comfyui/custom_nodes"
+  
+  if [ -d "$DEFAULT_NODES_SRC" ]; then
+    # Use cp -rT to copy the contents of the source directory into the destination.
+    cp -rT "$DEFAULT_NODES_SRC" "$DATA_CUSTOM_NODES"
+    echo "✅ Default nodes copied successfully."
+  else
+    echo "⚠️ Warning: Default nodes source directory not found at $DEFAULT_NODES_SRC. Skipping copy."
+  fi
+fi
+
+# ================================
+# Start COMFYUI 
+# ================================
+echo "🚀 Starting ComfyUI on port $COMFYUI_PORT"
+echo "📂 Output Directory: $DATA_OUTPUT"
+echo "📂 Models Directory: $MODELDIR"
+
+# Execute the command directly for safety and clarity.
+extra_parameters="<%= context.extra_parameters %>"
+CMD="singularity exec --nv \
+    -B $DATA_USER:/app/user \
+    -B $DATA_CONFIG:/app/config \
+    -B $DATA_TEMP:/app/temp \
+    -B $DATA_OUTPUT:/app/output \
+    -B $DATA_INPUT:/app/input \
+    -B $DATA_CUSTOM_NODES:/app/custom_nodes \
+    -B $MODELDIR:/app/models \
+    $COMFYUI_SIF \
+    main.py --listen 0.0.0.0 --port ${COMFYUI_PORT} $extra_parameters"
+
+# Print the command
+echo "$CMD"
+
+# Run the command
+eval "$CMD"

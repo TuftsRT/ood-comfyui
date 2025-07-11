@@ -1,0 +1,7 @@
+---
+name: "ComfyUI"
+category: "Interactive Apps"
+subcategory: "AI"
+role: "batch_connect"
+description: |
+  This app launches an instance of [ComfyUI](https://github.com/comfyanonymous/ComfyUI) on the Tufts HPC system.
