@@ -25,7 +25,6 @@ script:
     - "1"
     - "-p"
     - "<%= gpu_partition %>"
-    - "--exclude=p1cmp[090-109]"
 
     <%- if gpu_type == "a100-80GB" -%>
     - "--gres=gpu:a100:1"
