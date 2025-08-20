@@ -15,25 +15,24 @@ script:
   script: "script.sh.erb"
   job_name: "OnDemand/comfyui"
   native:
-    - "--time"
-    - "<%= bc_num_hours %>:0:0"
-    - "-n"
-    - "<%= num_cores %>"
-    - "--mem"
-    - "<%= num_memory %>"
-    - "--nodes"
-    - "1"
-    - "-p"
-    - "<%= gpu_partition %>"
-
-    <%- if gpu_type == "a100-80GB" -%>
+    - "--time=<%= bc_num_hours %>:00:00"
+    - "--cpus-per-task=<%= num_cores %>"
+    - "--mem=<%= num_memory %>G"
+    - "--nodes=1"
+    - "-p <%= partition %>"
+<%
+  skip_gres = gpu_type == "none" || ["batch", "largemem", "rc2", "pangolinlab", "ruiguolab", "shushkovlab", "vaseylab"].include?(partition)
+%>
+<% unless skip_gres %>
+  <% if gpu_type == "a100_40" %>
+    - "--gres=gpu:a100:1"
+    - "--constraint=a100-40G"
+  <% elsif gpu_type == "a100_80" %>
     - "--gres=gpu:a100:1"
     - "--constraint=a100-80G"
-
-    <%- elsif gpu_type == "any" -%>
+  <% elsif gpu_type == "any" %>
     - "--gres=gpu:1"
-
-    <%- elsif gpu_partition == "preempt" || gpu_partition == "gpu" -%>
+  <% else %>
     - "--gres=gpu:<%= gpu_type %>:1"
-
-    <%- end -%>
+  <% end %>
+<% end %>

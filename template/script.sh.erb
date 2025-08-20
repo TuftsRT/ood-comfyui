@@ -97,11 +97,11 @@ mkdir -p "$DATA_CUSTOM_NODES"
 # This prevents overwriting user-installed nodes on subsequent runs.
 if [ -z "$(ls -A "$DATA_CUSTOM_NODES")" ]; then
   echo "▶️ Custom nodes directory is empty. Copying default nodes..."
-  DEFAULT_NODES_SRC="/cluster/tufts/hpc/tools/comfyui/custom_nodes"
+  DEFAULT_NODES_SRC="/cluster/tufts/hpc/tools/comfyui/custom_nodes_${VER}"
   
   if [ -d "$DEFAULT_NODES_SRC" ]; then
-    # Use cp -rT to copy the contents of the source directory into the destination.
-    cp -rT "$DEFAULT_NODES_SRC" "$DATA_CUSTOM_NODES"
+    # Copy all contents of source into destination
+    cp -r "$DEFAULT_NODES_SRC"/. "$DATA_CUSTOM_NODES"/
     echo "✅ Default nodes copied successfully."
   else
     echo "⚠️ Warning: Default nodes source directory not found at $DEFAULT_NODES_SRC. Skipping copy."
@@ -126,7 +126,7 @@ CMD="singularity exec --nv \
     -B $DATA_CUSTOM_NODES:/app/custom_nodes \
     -B $MODELDIR:/app/models \
     $COMFYUI_SIF \
-    main.py --listen 0.0.0.0 --port ${COMFYUI_PORT} $extra_parameters"
+    python /app/main.py --listen 0.0.0.0 --port ${COMFYUI_PORT} $extra_parameters"
 
 # Print the command
 echo "$CMD"
