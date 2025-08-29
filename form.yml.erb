@@ -25,6 +25,7 @@ attributes:
     options:
             - ["0.3.41"]
             - ["0.3.51"]
+            - ["0.3.54"]
 
   modeldir:
     label: Model directory
@@ -48,6 +49,6 @@ attributes:
     widget: text_field
     required: false
     label: Extra command line arguments
-    value: "--supports-fp8-compute --fast --disable-smart-memory"
+    value: "--use-sage-attention --disable-xformers --supports-fp8-compute --disable-smart-memory"
     help: |
             Extra command line arguments provided to main.py. 
