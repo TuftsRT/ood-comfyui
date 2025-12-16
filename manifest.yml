@@ -1,7 +1,7 @@
 ---
-name: "ComfyUI"
+name: "Advanced AI Image Generator (ComfyUI)"
 category: "Interactive Apps"
 subcategory: "AI"
 role: "batch_connect"
 description: |
-  This app launches an instance of [ComfyUI](https://github.com/comfyanonymous/ComfyUI) on the Tufts HPC system.
+  ComfyUI offers a node-based interface for building complex image generation pipelines using Stable Diffusion and related models, giving users granular control over generative processes. This tool is not meant for personal use.
