@@ -1,135 +1,96 @@
 #!/bin/bash
-# ================================
-# A robust script to start ComfyUI in a Singularity container,
-# combining user-provided logic with safety checks.
-# ================================
 set -euo pipefail
 
-# ================================
-# Configuration
-# ================================
-# These variables are intended to be replaced by a templating engine (e.g., Open OnDemand).
+# --- Configuration (OOD Context) ---
 MODELDIR="<%= context.modeldir %>"
 DATA_DIR="<%= context.datadir %>"
 VER="<%= context.version %>"
 COMFYUI_SIF="/cluster/tufts/ngc/images/comfyui_${VER}.sif"
-# The 'port' variable is assumed to be provided by the environment.
+OVERLAY_IMG="${DATA_DIR}/comfyui_overlay_${USER}_${VER}.img"
+extra_parameters="<%= context.extra_parameters %>"
 COMFYUI_PORT=$port
 
-# --- Pre-flight Checks & Defaults ---
-# Trim whitespace and set a default DATA_DIR if it's empty or unset.
-if [ -z "$(echo "${DATA_DIR:-}" | xargs)" ]; then
-    echo "⚠️ DATA_DIR is not set or is empty, defaulting to '${HOME}/comfyui/data'"
-    DATA_DIR="${HOME}/comfyui/data"
-fi
-
-# Check that other critical variables are set.
-if [ -z "$MODELDIR" ]; then
-  echo "❌ Error: MODELDIR is not set. Please ensure 'context.modeldir' is provided."
-  exit 1
-fi
-if [ ! -f "$COMFYUI_SIF" ]; then
-  echo "❌ Error: Singularity image not found at $COMFYUI_SIF"
-  exit 1
-fi
-
-# ================================
-# Functions
-# ================================
-# Finds an available TCP port in the unassigned range.
-my_find_port() {
-    local host="127.0.0.1"
-    local min_port=49152
-    local max_port=65535
-
-    for port in $(shuf -i ${min_port}-${max_port}); do
-        # Check if port is available
-        if ! nc -z "$host" "$port" 2>/dev/null; then
-            echo "$port"
-            return 0
-        fi
-    done
-
-    echo "❌ Failed to find an available port in the range ${min_port}-${max_port}." >&2
-    return 1
-}
+# --- Define Overlay Shadow Paths ---
+WRITABLE_BASE="/writable_root"
+WRITABLE_APP="${WRITABLE_BASE}/app"
+WRITABLE_OPT="${WRITABLE_BASE}/opt"
 
 # ================================
 # Environment Setup
 # ================================
-echo "▶️ Setting up environment..."
 module purge
 module load singularity
-echo "Currently Loaded Modules:"
-module list
 
-# If COMFYUI_PORT is not set, find one automatically.
-if [ -z "$COMFYUI_PORT" ]; then
-    echo "▶️ Port not specified, finding an available port..."
-    COMFYUI_PORT=$(my_find_port)
-    echo "✅ Found available port: $COMFYUI_PORT"
+# UNIFIED PATH: Prioritize Writable Overlay, then System CUDA
+export SINGULARITYENV_PATH="${WRITABLE_OPT}/bin:/opt/nvidia/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# CUDA HOME & LIBRARIES: Directs installers to /opt/nvidia instead of standard paths
+export SINGULARITYENV_CUDA_HOME="/opt/nvidia"
+export SINGULARITYENV_LD_LIBRARY_PATH="/opt/nvidia/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+
+# REDIRECTION: Forces Python and uv to use the writable overlay
+export SINGULARITYENV_UV_LINK_MODE="copy"
+
+# ================================
+# Step 1: Manage Overlay
+# ================================
+if [ ! -f "$OVERLAY_IMG" ]; then
+    echo "▶️ Creating 20GB sparse overlay..."
+    mkdir -p "$(dirname "$OVERLAY_IMG")"
+    singularity overlay create --size 20480 --sparse "$OVERLAY_IMG"
 fi
 
 # ================================
-# Directory Setup
+# Step 2: Launch & Initialize
 # ================================
-echo "▶️ Setting up directories in $DATA_DIR..."
-DATA_USER=$DATA_DIR/user
-DATA_CONFIG=$DATA_DIR/config
-DATA_TEMP=$DATA_DIR/temp
 DATA_OUTPUT=$DATA_DIR/output
-DATA_INPUT=$DATA_DIR/input
-DATA_CUSTOM_NODES=$DATA_DIR/custom_nodes
-
-# Create all necessary directories. This is the crucial fix.
-# The original error was caused by DATA_CUSTOM_NODES not being created before the mount attempt.
-mkdir -p "$DATA_USER"
-mkdir -p "$DATA_CONFIG"
-mkdir -p "$DATA_TEMP"
 mkdir -p "$DATA_OUTPUT"
-mkdir -p "$DATA_INPUT"
-mkdir -p "$DATA_CUSTOM_NODES"
 
-# ================================
-# Custom Nodes Setup
-# ================================
-# Copy the default custom_nodes only if the user's custom_nodes directory is empty.
-# This prevents overwriting user-installed nodes on subsequent runs.
-if [ -z "$(ls -A "$DATA_CUSTOM_NODES")" ]; then
-  echo "▶️ Custom nodes directory is empty. Copying default nodes..."
-  DEFAULT_NODES_SRC="/cluster/tufts/hpc/tools/comfyui/custom_nodes_${VER}"
-  
-  if [ -d "$DEFAULT_NODES_SRC" ]; then
-    # Copy all contents of source into destination
-    cp -r "$DEFAULT_NODES_SRC"/. "$DATA_CUSTOM_NODES"/
-    echo "✅ Default nodes copied successfully."
-  else
-    echo "⚠️ Warning: Default nodes source directory not found at $DEFAULT_NODES_SRC. Skipping copy."
-  fi
-fi
+# We use a HEREDOC style for the inner script to avoid quote nesting hell
+singularity exec --nv \
+    --overlay "${OVERLAY_IMG}" \
+    -B "${DATA_OUTPUT}:/app/output" \
+    -B "${MODELDIR}:/app/models" \
+    "${COMFYUI_SIF}" \
+    /bin/bash << 'EOF'
+        # --- Shadow variables inside the container ---
+        WRITABLE_APP="/writable_root/app"
+        WRITABLE_OPT="/writable_root/opt"
+        export PYTHONPATH="${WRITABLE_APP}:${WRITABLE_OPT}/lib/python3.11/site-packages"
+        # One-time population of the overlay
+        if [ ! -d "${WRITABLE_APP}/comfy/ldm/models" ]; then
+            echo "▶️ Initializing Overlay (Attribute-Safe Mode)..."
+            mkdir -p ${WRITABLE_APP} ${WRITABLE_OPT}
+            
+            # -rl: Recursive and copy symlinks
+            # --no-t --no-p --no-g --no-o: Explicitly DO NOT sync times, perms, group, or owner
+            # --ignore-errors: Continue even if that one 'ld' link is broken
+            
+            echo "▶️ Copying ComfyUI Code..."
+            rsync -rl --no-t --no-p --no-g --no-o --ignore-errors \
+            --exclude='/models' --exclude='/output' \
+            /app/ ${WRITABLE_APP}/
+            
+            echo "▶️ Copying Conda Environment..."
+            rsync -rl --no-t --no-p --no-g --no-o --ignore-errors /opt/conda/ ${WRITABLE_OPT}/
+            
+            mkdir -p ${WRITABLE_APP}/models ${WRITABLE_APP}/output
+            echo "✅ Initialization complete."
+        fi
 
-# ================================
-# Start COMFYUI 
-# ================================
-echo "🚀 Starting ComfyUI on port $COMFYUI_PORT"
-echo "📂 Output Directory: $DATA_OUTPUT"
-echo "📂 Models Directory: $MODELDIR"
+        # FIX: Git Safe Directory
+        git config --global --add safe.directory /app
+        git config --global --add safe.directory ${WRITABLE_APP}
 
-# Execute the command directly for safety and clarity.
-extra_parameters="<%= context.extra_parameters %>"
-CMD="singularity exec --nv \
-    -B $DATA_USER:/app/user \
-    -B $DATA_CONFIG:/app/config \
-    -B $DATA_TEMP:/app/temp \
-    -B $DATA_OUTPUT:/app/output \
-    -B $DATA_INPUT:/app/input \
-    -B $DATA_CUSTOM_NODES:/app/custom_nodes \
-    -B $MODELDIR:/app/models \
-    $COMFYUI_SIF \
-    python /app/main.py --listen 0.0.0.0 --port ${COMFYUI_PORT} $extra_parameters"
+        cd ${WRITABLE_APP}
 
-# Print the command
-echo "$CMD"
+        # FIX: Pre-install nvdiffrast if missing
+        if ! python3 -c "import nvdiffrast" &>/dev/null; then
+            echo "▶️ Installing nvdiffrast..."
+            python3 -m pip install git+https://github.com/NVlabs/nvdiffrast.git
+        fi
 
-# Run the command
-eval "$CMD"
+        echo "▶️ Starting ComfyUI Server..."
+        # We use env vars passed from the host for port and params
+        python3 main.py --listen 0.0.0.0 --port ${SINGULARITYENV_PORT:-$port} ${extra_parameters:-}
+EOF
