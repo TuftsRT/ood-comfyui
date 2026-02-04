@@ -35,9 +35,9 @@ export SINGULARITYENV_UV_LINK_MODE="copy"
 # Step 1: Manage Overlay
 # ================================
 if [ ! -f "$OVERLAY_IMG" ]; then
-    echo "▶️ Creating 20GB sparse overlay..."
+    echo "▶️ Creating 50GB sparse overlay..."
     mkdir -p "$(dirname "$OVERLAY_IMG")"
-    singularity overlay create --size 20480 --sparse "$OVERLAY_IMG"
+    singularity overlay create --size 51200 --sparse "$OVERLAY_IMG"
 fi
 
 # ================================
