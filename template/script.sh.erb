@@ -49,8 +49,8 @@ mkdir -p "$DATA_OUTPUT"
 # We use a HEREDOC style for the inner script to avoid quote nesting hell
 singularity exec --nv \
     --overlay "${OVERLAY_IMG}" \
-    -B "${DATA_OUTPUT}:/app/output" \
-    -B "${MODELDIR}:/app/models" \
+    -B "${DATA_OUTPUT}:/writable_root/app/output" \
+    -B "${MODELDIR}:/writable_root/app/models" \
     "${COMFYUI_SIF}" \
     /bin/bash << 'EOF'
         # --- Shadow variables inside the container ---
