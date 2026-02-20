@@ -2,6 +2,7 @@
 cluster: "pax"
 
 form:
+  - disclaimer_block
   - bc_num_hours
   - num_cores
   - num_memory
@@ -17,6 +18,15 @@ attributes:
 <%= File.read("/etc/ood/config/apps/dashboard/batch_connect/partials/gpu_type.yml").indent(2) %>
 <%= File.read("/etc/ood/config/apps/dashboard/batch_connect/partials/num_cores_generic.yml").indent(2) %>
 <%= File.read("/etc/ood/config/apps/dashboard/batch_connect/partials/num_memory_generic.yml").indent(2) %>
+  
+  disclaimer_block:
+    widget: text_field
+    class: "d-none"
+    skip_label: true
+<% if File.exist?("/etc/ood/config/apps/dashboard/batch_connect/partials/ai_disclaimer.md")  %>
+    help: |
+<%= File.read("/etc/ood/config/apps/dashboard/batch_connect/partials/ai_disclaimer.md").indent(11) %>
+<%end%>
 
   version:
     label: Version
