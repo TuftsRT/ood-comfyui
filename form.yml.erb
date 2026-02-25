@@ -1,3 +1,11 @@
+<%
+  show_qos = false
+  qos_options = (`sacctmgr show assoc where user=#{ENV['USER']} format=qos%1000 --noheader --parsable2 `).split(",")
+
+  if qos_options.include?("interactive")
+    show_qos = true
+  end
+%>
 ---
 cluster: "pax"
 
@@ -12,6 +20,9 @@ form:
   - modeldir
   - datadir
   - extra_parameters
+<% if show_qos  %>
+  - ta_qos
+<%end%>
   
 attributes:
 <%= File.read("/etc/ood/config/apps/dashboard/batch_connect/partials/all_partition.yml").indent(2) %>
@@ -61,3 +72,11 @@ attributes:
     value: "--use-sage-attention --disable-xformers --supports-fp8-compute --disable-smart-memory"
     help: |
             Extra command line arguments provided to main.py. 
+
+  ta_qos:
+    widget: check_box
+    label: "Request priority start"
+    help: "Limited to 1 running job at a time. (--qos=interactive)"
+    value: "interactive"
+    checked_value: "interactive"
+    unchecked_value: "normal"

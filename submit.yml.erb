@@ -36,3 +36,6 @@ script:
     - "--gres=gpu:<%= gpu_type %>:1"
   <% end %>
 <% end %>
+<% if ta_qos %>
+    - "--qos=<%=ta_qos %>"
+<% end %>
