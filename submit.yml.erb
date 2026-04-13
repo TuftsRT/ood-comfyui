@@ -1,7 +1,7 @@
 <% require 'securerandom' %>
 <% password = SecureRandom.hex(12) %>
 <% host = `hostname`.strip %>
-
+cluster: "pax"
 batch_connect:
   template: "basic"
   conn_params:
