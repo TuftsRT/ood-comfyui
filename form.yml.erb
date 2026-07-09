@@ -1,11 +1,4 @@
 <%
-  show_qos = false
-  qos_options = (`sacctmgr show assoc where user=#{ENV['USER']} format=qos%1000 --noheader --parsable2 `).split(",")
-
-  if qos_options.include?("interactive")
-    show_qos = true
-  end
-
   ERB.new(File.read(File.expand_path('partials/gpu_discovery.erb', __dir__))).result(binding)
 %>
 ---
@@ -22,9 +15,7 @@ form:
   - modeldir
   - datadir
   - extra_parameters
-<% if show_qos  %>
   - ta_qos
-<%end%>
 
 attributes:
 <%= generate_partition_field.indent(2) %>  
