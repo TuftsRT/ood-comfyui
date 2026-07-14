@@ -21,21 +21,18 @@ script:
     - "--nodes=1"
     - "-p <%= partition %>"
 <%
-  skip_gres = gpu_type == "none" || ["batch", "largemem", "rc2", "pangolinlab", "ruiguolab", "shushkovlab", "vaseylab"].include?(partition)
+  # gpu_type from resource_discovery.erb is a feature variant like "a100-40G".
+  # The gres name is the part before the first "-"; the full variant is a
+  # node constraint. Empty/"none" (CPU partitions) => no GPU request.
+  gres_name = gpu_type.to_s.split('-', 2).first.to_s
+  skip_gres = gres_name.empty? || gres_name == "none"
 %>
 <% unless skip_gres %>
-  <% if gpu_type == "a100_40" %>
-    - "--gres=gpu:a100:1"
-    - "--constraint=a100-40G"
-  <% elsif gpu_type == "a100_80" %>
-    - "--gres=gpu:a100:1"
-    - "--constraint=a100-80G"
-  <% elsif gpu_type == "any" %>
-    - "--gres=gpu:1"
-  <% else %>
-    - "--gres=gpu:<%= gpu_type %>:1"
+    - "--gres=gpu:<%= gres_name %>:1"
+  <% if gpu_type.include?('-') %>
+    - "--constraint=<%= gpu_type %>"
   <% end %>
 <% end %>
-<% if ta_qos %>
-    - "--qos=<%=ta_qos %>"
-<% end %>
+    <%- if defined?(ta_qos) && ta_qos == "interactive" -%>
+    - "--qos=<%= ta_qos %>"
+    <%- end -%>

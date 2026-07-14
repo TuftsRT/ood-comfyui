@@ -1,7 +1,6 @@
 function updateGpuAvailabilityWarning() {
   var gpuTypeSelect = document.getElementById('batch_connect_session_context_gpu_type');
   if (!gpuTypeSelect) {
-    console.warn('[gpu-warning] update: missing gpu select element');
     return;
   }
 
@@ -30,7 +29,7 @@ function updateGpuAvailabilityWarning() {
   var existingWarning = document.getElementById(warningId);
   
   // Check if the selected GPU type is unavailable
-  var isUnavailable = unavailableMap.hasOwnProperty(selectedGpuType) && selectedGpuType !== 'any' && selectedGpuType !== 'none';
+  var isUnavailable = unavailableMap.hasOwnProperty(selectedGpuType) && selectedGpuType !== 'none' && selectedGpuType !== '';
   
   try {
     console.log('[gpu-warning] update:', {
@@ -92,7 +91,7 @@ function updateGpuAvailabilityWarning() {
       }
     }
   } else {
-    // Hide warning if GPU is available or if 'any' is selected
+    // Hide warning if GPU is available or no GPU is selected.
     if (existingWarning) {
       existingWarning.style.display = 'none';
     }
@@ -102,8 +101,11 @@ function updateGpuAvailabilityWarning() {
 function repopulateGpuTypesForPartition() {
   var partitionSelect = document.getElementById('batch_connect_session_context_partition');
   var gpuTypeSelect = document.getElementById('batch_connect_session_context_gpu_type');
-  if (!partitionSelect || !gpuTypeSelect) {
-    console.warn('[gpu] repopulate: missing partition or gpu select element');
+  if (!partitionSelect) {
+    console.warn('[gpu] repopulate: missing partition select element');
+    return;
+  }
+  if (!gpuTypeSelect) {
     return;
   }
 
@@ -124,15 +126,19 @@ function repopulateGpuTypesForPartition() {
     console.error('[gpu] repopulate: failed to parse data-partition-options JSON', e);
     return;
   }
-  // Check if the selected partition has GPU options in the map
-  var partitionHasGpus = map && Object.prototype.hasOwnProperty.call(map, selected);
+  // Check whether the selected partition has at least one concrete GPU option.
+  var partitionOptions = (map && Object.prototype.hasOwnProperty.call(map, selected)) ? map[selected] : [];
+  var partitionHasGpus = partitionOptions.some(function (opt) {
+    var value = Array.isArray(opt) ? opt[1] : opt;
+    return value && value !== 'none' && value !== 'any';
+  });
   var gpuFormGroup = gpuTypeSelect.closest('.mb-3') || gpuTypeSelect.closest('.form-group');
 
   var numGpusInput = document.getElementById('batch_connect_session_context_num_gpus');
   var numGpusFormGroup = numGpusInput ? (numGpusInput.closest('.mb-3') || numGpusInput.closest('.form-group')) : null;
 
   if (!partitionHasGpus) {
-    // Partition has no GPUs — hide the GPU fields and set to 'none'
+    // Partition has no GPUs: hide GPU fields and clear the submitted GPU value.
     try {
       console.log('[gpu] repopulate: partition "' + selected + '" has no GPUs, hiding gpu_type field');
     } catch (_) {}
@@ -143,16 +149,19 @@ function repopulateGpuTypesForPartition() {
     if (numGpusFormGroup) {
       numGpusFormGroup.style.display = 'none';
     }
+    if (numGpusInput) {
+      numGpusInput.value = '';
+    }
 
-    // Clear options and set a 'none' value so cores/memory lookups use the 'none' GPU type
+    // Clear options and submit a blank GPU value for CPU-only jobs.
     while (gpuTypeSelect.firstChild) {
       gpuTypeSelect.removeChild(gpuTypeSelect.firstChild);
     }
-    var noneOpt = document.createElement('option');
-    noneOpt.textContent = 'none';
-    noneOpt.value = 'none';
-    gpuTypeSelect.appendChild(noneOpt);
-    gpuTypeSelect.value = 'none';
+    var blankOpt = document.createElement('option');
+    blankOpt.textContent = '';
+    blankOpt.value = '';
+    gpuTypeSelect.appendChild(blankOpt);
+    gpuTypeSelect.value = '';
     return;
   }
 
@@ -163,9 +172,12 @@ function repopulateGpuTypesForPartition() {
   if (numGpusFormGroup) {
     numGpusFormGroup.style.display = '';
   }
+  if (numGpusInput && !numGpusInput.value) {
+    numGpusInput.value = '1';
+  }
 
   var usedKey = selected;
-  var opts = map[usedKey] || [];
+  var opts = partitionOptions;
   try {
     console.log('[gpu] repopulate: start', {
       selectedPartition: selected,
@@ -206,7 +218,93 @@ function repopulateGpuTypesForPartition() {
   if (!gpuTypeSelect.value && gpuTypeSelect.options.length > 0) {
     gpuTypeSelect.selectedIndex = 0;
   }
-  try { console.log('[gpu] repopulate: final selection', gpuTypeSelect.value || '(none)'); } catch (_) {}
+  try { console.log('[gpu] repopulate: final selection', gpuTypeSelect.value || '(blank)'); } catch (_) {}
+}
+
+function updateNumGpusForPartition() {
+  var partitionSelect = document.getElementById('batch_connect_session_context_partition');
+  var gpuTypeSelect = document.getElementById('batch_connect_session_context_gpu_type');
+  var numGpusInput = document.getElementById('batch_connect_session_context_num_gpus');
+
+  // Most apps have no num_gpus field; return quietly rather than warning on
+  // every partition/gpu_type change. Only a missing partition select is notable.
+  if (!numGpusInput) {
+    return;
+  }
+  if (!partitionSelect) {
+    console.warn('[num_gpus] update: missing partition input element');
+    return;
+  }
+
+  var selectedPartition = partitionSelect.value;
+  var selectedGpuType = gpuTypeSelect ? gpuTypeSelect.value : 'none';
+
+  if (!selectedGpuType || selectedGpuType === 'none') {
+    numGpusInput.value = '';
+    return;
+  }
+
+  var datasetValue = (numGpusInput.dataset && numGpusInput.dataset.partitionGpuMaxGpus) ? numGpusInput.dataset.partitionGpuMaxGpus : null;
+  var attrValue = datasetValue ? null : numGpusInput.getAttribute('data-partition-gpu-max-gpus');
+  var optionsSource = datasetValue ? 'input-dataset' : (attrValue ? 'input-attribute' : null);
+  var optionsJson = datasetValue || attrValue;
+
+  if (!optionsJson) {
+    console.warn('[num_gpus] update: no data-partition-gpu-max-gpus found');
+    return;
+  }
+
+  var map;
+  try {
+    map = JSON.parse(optionsJson);
+  } catch (e) {
+    console.error('[num_gpus] update: failed to parse data-partition-gpu-max-gpus JSON', e);
+    return;
+  }
+
+  var maxGpus = null;
+  if (map[selectedPartition] && map[selectedPartition][selectedGpuType]) {
+    maxGpus = map[selectedPartition][selectedGpuType];
+  } else if (map[selectedPartition] && map[selectedPartition]['any']) {
+    maxGpus = map[selectedPartition]['any'];
+  } else if (map['all'] && map['all'][selectedGpuType]) {
+    maxGpus = map['all'][selectedGpuType];
+  } else if (map['all'] && map['all']['any']) {
+    maxGpus = map['all']['any'];
+  }
+
+  try {
+    console.log('[num_gpus] update: start', {
+      selectedPartition: selectedPartition,
+      selectedGpuType: selectedGpuType,
+      source: optionsSource,
+      maxGpus: maxGpus
+    });
+  } catch (_) {}
+
+  if (!maxGpus || maxGpus <= 0) {
+    numGpusInput.value = '';
+    console.warn('[num_gpus] update: invalid max GPUs for partition+GPU', selectedPartition, selectedGpuType);
+    return;
+  }
+
+  var currentValue = parseInt(numGpusInput.value, 10) || 1;
+  numGpusInput.setAttribute('max', maxGpus);
+
+  if (currentValue > maxGpus) {
+    numGpusInput.value = maxGpus;
+    try { console.log('[num_gpus] update: adjusted value from', currentValue, 'to', maxGpus); } catch (_) {}
+  } else if (!numGpusInput.value) {
+    numGpusInput.value = '1';
+  }
+
+  var helpText = numGpusInput.parentElement.querySelector('.form-text, .help-block');
+  if (helpText) {
+    helpText.textContent = 'Number of GPUs to allocate on one node. Max varies by partition and GPU type (Maximum: ' + maxGpus + ' GPUs).';
+    try { console.log('[num_gpus] update: updated help text to show', maxGpus, 'GPUs'); } catch (_) {}
+  }
+
+  try { console.log('[num_gpus] update: final max =', maxGpus, ', value =', numGpusInput.value); } catch (_) {}
 }
 
 function updateCoresForPartition() {
@@ -214,13 +312,13 @@ function updateCoresForPartition() {
   var gpuTypeSelect = document.getElementById('batch_connect_session_context_gpu_type');
   var coresInput = document.getElementById('batch_connect_session_context_num_cores');
   
-  if (!partitionSelect || !gpuTypeSelect || !coresInput) {
-    console.warn('[cores] update: missing partition, gpu_type, or cores input element');
+  if (!partitionSelect || !coresInput) {
+    console.warn('[cores] update: missing partition or cores input element');
     return;
   }
 
   var selectedPartition = partitionSelect.value;
-  var selectedGpuType = gpuTypeSelect.value;
+  var selectedGpuType = gpuTypeSelect ? gpuTypeSelect.value : 'none';
   
   // Read partition_gpu_max_cores data from the cores input's dataset or attribute
   var datasetValue = (coresInput.dataset && coresInput.dataset.partitionGpuMaxCores) ? coresInput.dataset.partitionGpuMaxCores : null;
@@ -293,13 +391,13 @@ function updateMemoryForPartition() {
   var gpuTypeSelect = document.getElementById('batch_connect_session_context_gpu_type');
   var memoryInput = document.getElementById('batch_connect_session_context_num_memory');
   
-  if (!partitionSelect || !gpuTypeSelect || !memoryInput) {
-    console.warn('[memory] update: missing partition, gpu_type, or memory input element');
+  if (!partitionSelect || !memoryInput) {
+    console.warn('[memory] update: missing partition or memory input element');
     return;
   }
 
   var selectedPartition = partitionSelect.value;
-  var selectedGpuType = gpuTypeSelect.value;
+  var selectedGpuType = gpuTypeSelect ? gpuTypeSelect.value : 'none';
   
   // Read partition_gpu_max_memory data from the memory input's dataset or attribute
   var datasetValue = (memoryInput.dataset && memoryInput.dataset.partitionGpuMaxMemory) ? memoryInput.dataset.partitionGpuMaxMemory : null;
@@ -337,8 +435,9 @@ function updateMemoryForPartition() {
     return;
   }
 
-  // Convert MB to GB and round to nearest whole number (no decimals)
-  var maxMemoryGB = Math.round(maxMemoryMB / 1024.0);
+  // Convert MB to GB, flooring so we never advertise more memory than a node
+  // actually has (matches the server-side .floor in resource_discovery.erb).
+  var maxMemoryGB = Math.max(Math.floor(maxMemoryMB / 1024.0), 1);
   
   try {
     console.log('[memory] update: start', {
@@ -443,36 +542,72 @@ function updateHoursForPartition() {
   try { console.log('[hours] update: final max =', maxHours, ', value =', hoursInput.value); } catch (_) {}
 }
 
-document.addEventListener('DOMContentLoaded', function () {
-  try { console.log('[gpu] DOMContentLoaded: initializing GPU options, cores, memory, hours, and availability warnings'); } catch (_) {}
+function initializeResourceDiscoveryForm() {
+  if (window.oodResourceDiscoveryInitialized) {
+    return true;
+  }
+
+  try { console.log('[gpu] initializing GPU options, cores, memory, hours, and availability warnings'); } catch (_) {}
+  var partitionSelect = document.getElementById('batch_connect_session_context_partition');
+  if (!partitionSelect) {
+    try { console.warn('[gpu] initialize: partition select not found yet, will retry'); } catch (_) {}
+    return false;
+  }
+
+  window.oodResourceDiscoveryInitialized = true;
+
   repopulateGpuTypesForPartition();
+  updateNumGpusForPartition();
   updateCoresForPartition();
   updateMemoryForPartition();
   updateHoursForPartition();
   updateGpuAvailabilityWarning();
   
-  var partitionSelect = document.getElementById('batch_connect_session_context_partition');
   var gpuTypeSelect = document.getElementById('batch_connect_session_context_gpu_type');
   
-  if (partitionSelect) {
-    partitionSelect.addEventListener('change', function () {
-      try { console.log('[partition] change ->', partitionSelect.value); } catch (_) {}
-      repopulateGpuTypesForPartition();
-      updateCoresForPartition();
-      updateMemoryForPartition();
-      updateHoursForPartition();
-      updateGpuAvailabilityWarning();
-    });
-  }
+  partitionSelect.addEventListener('change', function () {
+    try { console.log('[partition] change ->', partitionSelect.value); } catch (_) {}
+    repopulateGpuTypesForPartition();
+    updateNumGpusForPartition();
+    updateCoresForPartition();
+    updateMemoryForPartition();
+    updateHoursForPartition();
+    updateGpuAvailabilityWarning();
+  });
   
   if (gpuTypeSelect) {
     gpuTypeSelect.addEventListener('change', function () {
       try { console.log('[gpu_type] change ->', gpuTypeSelect.value); } catch (_) {}
+      updateNumGpusForPartition();
       updateCoresForPartition();
       updateMemoryForPartition();
       updateGpuAvailabilityWarning();
     });
   }
-});
 
+  return true;
+}
 
+function initializeResourceDiscoveryFormWhenReady() {
+  if (initializeResourceDiscoveryForm()) {
+    return;
+  }
+
+  setTimeout(initializeResourceDiscoveryForm, 250);
+  setTimeout(initializeResourceDiscoveryForm, 1000);
+
+  if (window.MutationObserver) {
+    var observer = new MutationObserver(function () {
+      if (initializeResourceDiscoveryForm()) {
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeResourceDiscoveryFormWhenReady);
+} else {
+  initializeResourceDiscoveryFormWhenReady();
+}

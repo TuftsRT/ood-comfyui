@@ -1,5 +1,7 @@
 <%
-  ERB.new(File.read(File.expand_path('partials/gpu_discovery.erb', __dir__))).result(binding)
+  @partition_filter = :all
+  _partial_path = '/etc/ood/config/apps/dashboard/batch_connect/partials/resource_discovery.erb'
+  ERB.new(File.read(_partial_path)).result(binding)
 %>
 ---
 cluster: "pax"
@@ -71,6 +73,6 @@ attributes:
     widget: check_box
     label: "Request priority start"
     help: "Starts sooner, but is limited to 1 running job, up to 64 CPUs, and up to 64 GB of memory. If you need more resources, leave this unchecked."
-    value: "interactive"
+    value: "normal"
     checked_value: "interactive"
     unchecked_value: "normal"
