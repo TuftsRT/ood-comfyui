@@ -1,6 +1,7 @@
 <% require 'securerandom' %>
 <% password = SecureRandom.hex(12) %>
 <% host = `hostname`.strip %>
+---
 cluster: "pax"
 batch_connect:
   template: "basic"
@@ -8,8 +9,6 @@ batch_connect:
     - working_path
 
 script:
-  email_on_started: true
-  email_on_terminated: true
   email: <%= ENV["USER"] %>@tufts.edu
   before_script: "before.sh.erb"
   script: "script.sh.erb"
@@ -19,7 +18,7 @@ script:
     - "--cpus-per-task=<%= num_cores %>"
     - "--mem=<%= num_memory %>G"
     - "--nodes=1"
-    - "-p <%= partition %>"
+    - "--partition=<%= partition %>"
 <%
   # gpu_type from resource_discovery.erb is a feature variant like "a100-40G".
   # The gres name is the part before the first "-"; the full variant is a
