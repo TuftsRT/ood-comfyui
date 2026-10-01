@@ -1,96 +1,1005 @@
 #!/bin/bash
 set -euo pipefail
 
-# --- Configuration (OOD Context) ---
-MODELDIR="<%= context.modeldir %>"
-DATA_DIR="<%= context.datadir %>"
-VER="<%= context.version %>"
+# =============================================================================
+# Open OnDemand - ComfyUI
+# =============================================================================
+
+# =============================================================================
+# OOD configuration
+# =============================================================================
+
+# Form values are single-quoted so that whitespace or shell metacharacters
+# typed into a text field cannot terminate the assignment and execute.
+
+# gsub must use the block form: in a replacement *string*, \' means the
+# post-match, which would silently produce a broken quoting.
+
+MODELDIR=<%= "'" + context.modeldir.to_s.gsub("'") { %q{'\''} } + "'" %>
+DATA_DIR=<%= "'" + context.datadir.to_s.gsub("'") { %q{'\''} } + "'" %>
+VER=<%= "'" + context.version.to_s.gsub("'") { %q{'\''} } + "'" %>
+
+EXTRA_PARAMETERS=<%= "'" + context.extra_parameters.to_s.gsub("'") { %q{'\''} } + "'" %>
+
 COMFYUI_SIF="/cluster/tufts/ngc/images/comfyui_${VER}.sif"
-OVERLAY_IMG="${DATA_DIR}/comfyui_overlay_${USER}_${VER}.img"
-extra_parameters="<%= context.extra_parameters %>"
-COMFYUI_PORT=$port
 
-# --- Define Overlay Shadow Paths ---
-WRITABLE_BASE="/writable_root"
-WRITABLE_APP="${WRITABLE_BASE}/app"
-WRITABLE_OPT="${WRITABLE_BASE}/opt"
+COMFYUI_PORT="$port"
 
-# ================================
-# Environment Setup
-# ================================
+
+# =============================================================================
+# Persistent ComfyUI storage
+# =============================================================================
+
+# The form's DATA_DIR field is optional. Fall back to the user's home
+# directory so that leaving it blank yields ${HOME}/comfyui/<version>
+# rather than an unwritable /comfyui/<version>.
+
+if [[ -z "${DATA_DIR//[[:space:]]/}" ]]; then
+    DATA_DIR="${HOME}"
+    echo
+    echo "NOTE: No DATA_DIR selected; using ${DATA_DIR}"
+fi
+
+COMFYUI_DATA="${DATA_DIR}/comfyui/${VER}"
+
+# Group/project data remain shared when multiple users select the same DATA_DIR.
+INPUT_DIR="${COMFYUI_DATA}/input"
+OUTPUT_DIR="${COMFYUI_DATA}/output"
+USER_MODEL_DIR="${COMFYUI_DATA}/models"
+
+# ComfyUI state that must not be concurrently modified is private per user.
+USER_STATE_DIR="${COMFYUI_DATA}/users/${USER}"
+USER_DIR="${USER_STATE_DIR}/user"
+EXTRA_MODEL_PATHS="${USER_DIR}/extra_model_paths.yaml"
+
+
+# =============================================================================
+# ComfyUI Manager configuration
+# =============================================================================
+
+# Manager has moved its config directory between releases:
+#
+#   Manager v3.x      <user>/default/ComfyUI-Manager/config.ini
+#   Manager v4 (0.3.76+)  <user>/__manager/config.ini
+#
+# The image version selected on the form determines which one is read, and
+# the losing path is simply ignored. Write the policy to both so that the
+# settings apply regardless of which Manager the image ships. ComfyUI logs
+# the path it actually loaded during startup.
+
+MANAGER_DIRS=(
+    "${USER_DIR}/__manager"
+    "${USER_DIR}/default/ComfyUI-Manager"
+)
+
+
+# =============================================================================
+# Persistent writable overlay
+# =============================================================================
+
+OVERLAY_DIR="${USER_STATE_DIR}/overlay"
+OVERLAY_IMG="${OVERLAY_DIR}/comfyui_${VER}.img"
+OVERLAY_SIZE_MB=20480
+
+# Guards against two jobs mounting the same ext3 overlay read-write, which
+# corrupts it. Slurm is the source of truth rather than flock(2), whose
+# behaviour on Lustre/GPFS depends on how the filesystem was mounted.
+OVERLAY_LOCK="${OVERLAY_IMG}.in-use"
+
+
+# =============================================================================
+# Temporary directory
+# =============================================================================
+
+if [[ -n "${TMPDIR:-}" && -d "${TMPDIR}" ]]; then
+    TEMP_BASE="${TMPDIR}"
+else
+    TEMP_BASE="${COMFYUI_DATA}/temp"
+fi
+
+TEMP_DIR="${TEMP_BASE}/comfyui_${USER}_${VER}_${COMFYUI_PORT}"
+
+
+# =============================================================================
+# Singularity
+# =============================================================================
+
 module purge
 module load singularity
 
-# UNIFIED PATH: Prioritize Writable Overlay, then System CUDA
-export SINGULARITYENV_PATH="${WRITABLE_OPT}/bin:/opt/nvidia/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# CUDA HOME & LIBRARIES: Directs installers to /opt/nvidia instead of standard paths
-export SINGULARITYENV_CUDA_HOME="/opt/nvidia"
-export SINGULARITYENV_LD_LIBRARY_PATH="/opt/nvidia/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+# =============================================================================
+# Validate base image
+# =============================================================================
 
-# REDIRECTION: Forces Python and uv to use the writable overlay
-export SINGULARITYENV_UV_LINK_MODE="copy"
-
-# ================================
-# Step 1: Manage Overlay
-# ================================
-if [ ! -f "$OVERLAY_IMG" ]; then
-    echo "▶️ Creating 50GB sparse overlay..."
-    mkdir -p "$(dirname "$OVERLAY_IMG")"
-    singularity overlay create --size 51200 --sparse "$OVERLAY_IMG"
+if [[ ! -f "${COMFYUI_SIF}" ]]; then
+    echo
+    echo "ERROR: ComfyUI SIF not found:"
+    echo "  ${COMFYUI_SIF}"
+    exit 1
 fi
 
-# ================================
-# Step 2: Launch & Initialize
-# ================================
-DATA_OUTPUT=$DATA_DIR/output
-mkdir -p "$DATA_OUTPUT"
 
-# We use a HEREDOC style for the inner script to avoid quote nesting hell
-singularity exec --nv \
+# =============================================================================
+# Validate models
+# =============================================================================
+
+if [[ ! -d "${MODELDIR}" ]]; then
+    echo
+    echo "ERROR: Model directory not found:"
+    echo "  ${MODELDIR}"
+    exit 1
+fi
+
+
+# =============================================================================
+# Create persistent directories
+# =============================================================================
+
+mkdir -p \
+    "${COMFYUI_DATA}" \
+    "${USER_STATE_DIR}" \
+    "${OVERLAY_DIR}" \
+    "${USER_DIR}" \
+    "${INPUT_DIR}" \
+    "${OUTPUT_DIR}" \
+    "${USER_MODEL_DIR}" \
+    "${MANAGER_DIRS[@]}" \
+    "${TEMP_DIR}"
+
+
+# =============================================================================
+# Persistent model configuration
+# =============================================================================
+
+# Keep the centrally managed MODELDIR mounted at /app/models, while making
+# this persistent DATA_DIR model tree the default location for Manager downloads.
+# When DATA_DIR is shared by a group, downloaded models are shared by that group.
+# ComfyUI searches both its normal /app/models tree and the paths below.
+
+cat > "${EXTRA_MODEL_PATHS}" <<'MODEL_PATHS_EOF'
+tufts_user_models:
+    base_path: /app/user_models
+    is_default: true
+    download_model_base: .
+    checkpoints: checkpoints
+    text_encoders: |
+        text_encoders
+        clip
+    clip_vision: clip_vision
+    configs: configs
+    controlnet: controlnet
+    diffusion_models: |
+        diffusion_models
+        unet
+    embeddings: embeddings
+    diffusers: diffusers
+    gligen: gligen
+    hypernetworks: hypernetworks
+    loras: loras
+    style_models: style_models
+    upscale_models: upscale_models
+    vae: vae
+    vae_approx: vae_approx
+    audio_encoders: audio_encoders
+    model_patches: model_patches
+MODEL_PATHS_EOF
+
+# Pre-create the common directories. Manager can create additional model-type
+# directories later when a registered model requires one.
+mkdir -p \
+    "${USER_MODEL_DIR}/checkpoints" \
+    "${USER_MODEL_DIR}/text_encoders" \
+    "${USER_MODEL_DIR}/clip" \
+    "${USER_MODEL_DIR}/clip_vision" \
+    "${USER_MODEL_DIR}/controlnet" \
+    "${USER_MODEL_DIR}/diffusion_models" \
+    "${USER_MODEL_DIR}/embeddings" \
+    "${USER_MODEL_DIR}/loras" \
+    "${USER_MODEL_DIR}/upscale_models" \
+    "${USER_MODEL_DIR}/vae"
+
+# =============================================================================
+# Release resources on exit
+# =============================================================================
+
+# Installed before the lock is taken so that TEMP_DIR is still cleaned up
+# when this job is turned away below. The lock is only released if this job
+# is the one holding it, so being turned away never frees another job's lock.
+
+cleanup() {
+    LOCK_HOLDER="$(head -n 1 "${OVERLAY_LOCK}" 2>/dev/null || true)"
+
+    if [[ "${LOCK_HOLDER}" == "${SLURM_JOB_ID:-unknown}" ]]; then
+        rm -f "${OVERLAY_LOCK}" 2>/dev/null || true
+    fi
+
+    if [[ -d "${TEMP_DIR}" ]]; then
+        rm -rf "${TEMP_DIR}" 2>/dev/null || true
+    fi
+}
+
+trap cleanup EXIT
+
+
+# =============================================================================
+# Single-writer lock on the overlay
+# =============================================================================
+
+if [[ -f "${OVERLAY_LOCK}" ]]; then
+
+    LOCK_HOLDER="$(head -n 1 "${OVERLAY_LOCK}" 2>/dev/null || true)"
+
+    if [[ -n "${LOCK_HOLDER}" ]] && command -v squeue >/dev/null 2>&1 \
+        && squeue -h -j "${LOCK_HOLDER}" -o '%T' 2>/dev/null \
+            | grep -qE 'RUNNING|PENDING|CONFIGURING|COMPLETING'; then
+
+        echo
+        echo "======================================================================"
+        echo " ERROR: this ComfyUI environment is already in use"
+        echo "======================================================================"
+        echo
+        echo "Overlay:"
+        echo "  ${OVERLAY_IMG}"
+        echo
+        echo "It is held by job ${LOCK_HOLDER}, which is still active."
+        echo
+        echo "Two sessions cannot share one custom-node environment: both would"
+        echo "write to the same overlay image and corrupt it. Cancel or wait for"
+        echo "job ${LOCK_HOLDER}, or launch this session with a different DATA_DIR."
+        echo
+        exit 1
+    fi
+
+    echo
+    echo "NOTE: Clearing a stale lock left by job ${LOCK_HOLDER:-unknown}."
+fi
+
+echo "${SLURM_JOB_ID:-unknown}" > "${OVERLAY_LOCK}"
+
+
+# =============================================================================
+# ComfyUI Manager configuration
+# =============================================================================
+
+set_manager_option() {
+    local config="$1"
+    local key="$2"
+    local value="$3"
+
+    if grep -qE "^[[:space:]]*${key}[[:space:]]*=" \
+        "${config}" 2>/dev/null; then
+
+        sed -i -E \
+            "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" \
+            "${config}"
+    else
+        echo "${key} = ${value}" >> "${config}"
+    fi
+}
+
+
+for MANAGER_DIR in "${MANAGER_DIRS[@]}"; do
+
+MANAGER_CONFIG="${MANAGER_DIR}/config.ini"
+
+if [[ ! -f "${MANAGER_CONFIG}" ]]; then
+
+    cat > "${MANAGER_CONFIG}" <<'MANAGER_EOF'
+[default]
+git_exe =
+use_uv = False
+use_unified_resolver = False
+channel_url = https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main
+share_option = all
+bypass_ssl = False
+file_logging = True
+update_policy = stable-comfyui
+windows_selector_event_loop_policy = False
+model_download_by_agent = False
+downgrade_blacklist =
+security_level = normal
+always_lazy_install = False
+network_mode = public
+db_mode = cache
+verbose = True
+allow_git_url_install = False
+allow_pip_install = False
+MANAGER_EOF
+
+fi
+
+
+# Force important values even if Manager has modified config.ini.
+#
+# network_mode accepts only public, private or offline. Anything else is
+# read without complaint and then matches neither branch in Manager, which
+# leaves the node registry fetch non-blocking and can present an empty node
+# catalogue on a cold cache.
+
+set_manager_option "${MANAGER_CONFIG}" "use_uv" "False"
+set_manager_option "${MANAGER_CONFIG}" "use_unified_resolver" "False"
+set_manager_option "${MANAGER_CONFIG}" "security_level" "normal"
+set_manager_option "${MANAGER_CONFIG}" "network_mode" "public"
+set_manager_option "${MANAGER_CONFIG}" "verbose" "True"
+set_manager_option "${MANAGER_CONFIG}" "allow_git_url_install" "False"
+set_manager_option "${MANAGER_CONFIG}" "allow_pip_install" "False"
+
+
+# =============================================================================
+# Show Manager configuration
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " ComfyUI Manager configuration"
+echo "======================================================================"
+echo
+echo "Config file:"
+echo "  ${MANAGER_CONFIG}"
+echo
+
+grep -E \
+    '^(use_uv|use_unified_resolver|verbose|security_level|network_mode|allow_git_url_install|allow_pip_install)[[:space:]]*=' \
+    "${MANAGER_CONFIG}" || true
+
+echo
+
+
+# =============================================================================
+# Verify that set_manager_option actually rewrote the file
+# =============================================================================
+
+# This confirms the sed edits landed. It says nothing about which config
+# Manager loads - watch the ComfyUI startup log for that.
+
+if ! grep -qE \
+    '^network_mode[[:space:]]*=[[:space:]]*public[[:space:]]*$' \
+    "${MANAGER_CONFIG}"; then
+
+    echo "ERROR: Failed to write network_mode into:"
+    echo "  ${MANAGER_CONFIG}"
+    echo
+    cat "${MANAGER_CONFIG}"
+    exit 1
+fi
+
+if ! grep -qE \
+    '^security_level[[:space:]]*=[[:space:]]*normal[[:space:]]*$' \
+    "${MANAGER_CONFIG}"; then
+
+    echo "ERROR: Failed to write security_level into:"
+    echo "  ${MANAGER_CONFIG}"
+    exit 1
+fi
+
+echo "OK: settings written."
+echo
+
+done
+
+
+# =============================================================================
+# Create persistent overlay
+# =============================================================================
+
+if [[ ! -f "${OVERLAY_IMG}" ]]; then
+
+    echo
+    echo "======================================================================"
+    echo " Creating ComfyUI writable overlay"
+    echo "======================================================================"
+    echo
+    echo "Overlay:"
+    echo "  ${OVERLAY_IMG}"
+    echo
+    echo "Maximum size:"
+    echo "  ${OVERLAY_SIZE_MB} MB"
+    echo
+
+    singularity overlay create \
+        --size "${OVERLAY_SIZE_MB}" \
+        --sparse \
+        "${OVERLAY_IMG}"
+
+    echo
+    echo "Overlay created successfully."
+    echo
+fi
+
+
+# =============================================================================
+# Singularity environment
+# =============================================================================
+
+export SINGULARITYENV_PYTHONNOUSERSITE=1
+export SINGULARITYENV_VIRTUAL_ENV="/opt/comfyui-venv"
+
+export SINGULARITYENV_PATH="/opt/comfyui-venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+export SINGULARITYENV_CUDA_HOME="/usr/local/cuda"
+
+export SINGULARITYENV_LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu"
+
+export SINGULARITYENV_UV_LINK_MODE="copy"
+
+
+# =============================================================================
+# Do NOT use external Python package locations
+# =============================================================================
+
+unset SINGULARITYENV_PYTHONPATH 2>/dev/null || true
+unset SINGULARITYENV_PIP_TARGET 2>/dev/null || true
+unset SINGULARITYENV_PIP_PREFIX 2>/dev/null || true
+unset SINGULARITYENV_PIP_USER 2>/dev/null || true
+
+
+# =============================================================================
+# Job information
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " ComfyUI Open OnDemand"
+echo "======================================================================"
+echo
+echo "Version:       ${VER}"
+echo "Container:     ${COMFYUI_SIF}"
+echo "Overlay:       ${OVERLAY_IMG}"
+echo "Port:          ${COMFYUI_PORT}"
+echo
+echo "Shared models: ${MODELDIR}"
+echo "User models:   ${USER_MODEL_DIR}"
+echo "User data:     ${USER_DIR}"
+echo "Input:         ${INPUT_DIR}"
+echo "Output:        ${OUTPUT_DIR}"
+echo "Temp:          ${TEMP_DIR}"
+echo
+echo "======================================================================"
+echo
+
+
+# =============================================================================
+# Start Singularity
+# =============================================================================
+
+singularity exec \
+    --nv \
+    --cleanenv \
     --overlay "${OVERLAY_IMG}" \
-    -B "${DATA_OUTPUT}:/writable_root/app/output" \
-    -B "${MODELDIR}:/writable_root/app/models" \
+    -B "${MODELDIR}:/app/models:ro" \
+    -B "${USER_MODEL_DIR}:/app/user_models" \
+    -B "${USER_DIR}:/app/user" \
+    -B "${INPUT_DIR}:/app/input" \
+    -B "${OUTPUT_DIR}:/app/output" \
+    -B "${TEMP_DIR}:/app/temp" \
     "${COMFYUI_SIF}" \
-    /bin/bash << 'EOF'
-        # --- Shadow variables inside the container ---
-        WRITABLE_APP="/writable_root/app"
-        WRITABLE_OPT="/writable_root/opt"
-        export PYTHONPATH="${WRITABLE_APP}:${WRITABLE_OPT}/lib/python3.11/site-packages"
-        # One-time population of the overlay
-        if [ ! -d "${WRITABLE_APP}/comfy/ldm/models" ]; then
-            echo "▶️ Initializing Overlay (Attribute-Safe Mode)..."
-            mkdir -p ${WRITABLE_APP} ${WRITABLE_OPT}
-            
-            # -rl: Recursive and copy symlinks
-            # --no-t --no-p --no-g --no-o: Explicitly DO NOT sync times, perms, group, or owner
-            # --ignore-errors: Continue even if that one 'ld' link is broken
-            
-            echo "▶️ Copying ComfyUI Code..."
-            rsync -rl --no-t --no-p --no-g --no-o --ignore-errors \
-            --exclude='/models' --exclude='/output' \
-            /app/ ${WRITABLE_APP}/
-            
-            echo "▶️ Copying Conda Environment..."
-            rsync -rl --no-t --no-p --no-g --no-o --ignore-errors /opt/conda/ ${WRITABLE_OPT}/
-            
-            mkdir -p ${WRITABLE_APP}/models ${WRITABLE_APP}/output
-            echo "✅ Initialization complete."
-        fi
+    /bin/bash -s -- \
+    "${COMFYUI_PORT}" \
+    "${EXTRA_PARAMETERS}" <<'CONTAINER_EOF'
 
-        # FIX: Git Safe Directory
-        git config --global --add safe.directory /app
-        git config --global --add safe.directory ${WRITABLE_APP}
+set -euo pipefail
 
-        cd ${WRITABLE_APP}
+COMFYUI_PORT="$1"
+EXTRA_PARAMETERS="${2:-}"
 
-        # FIX: Pre-install nvdiffrast if missing
-        if ! python3 -c "import nvdiffrast" &>/dev/null; then
-            echo "▶️ Installing nvdiffrast..."
-            python3 -m pip install git+https://github.com/NVlabs/nvdiffrast.git
-        fi
 
-        echo "▶️ Starting ComfyUI Server..."
-        # We use env vars passed from the host for port and params
-        python3 main.py --listen 0.0.0.0 --port ${SINGULARITYENV_PORT:-$port} ${extra_parameters:-}
-EOF
+# =============================================================================
+# Container environment
+# =============================================================================
+
+export PYTHONNOUSERSITE=1
+export VIRTUAL_ENV="/opt/comfyui-venv"
+
+export PATH="/opt/comfyui-venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+export CUDA_HOME="/usr/local/cuda"
+export UV_LINK_MODE="copy"
+
+unset PYTHONPATH 2>/dev/null || true
+unset PIP_TARGET 2>/dev/null || true
+unset PIP_PREFIX 2>/dev/null || true
+unset PIP_USER 2>/dev/null || true
+
+
+# =============================================================================
+# Python diagnostics
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " Python environment"
+echo "======================================================================"
+echo
+
+echo "Python executable:"
+command -v python
+
+echo
+python --version
+
+echo
+python -m pip --version
+
+echo
+
+python - <<'PYTHON_EOF'
+import site
+import sys
+import torch
+
+print("Python executable:  ", sys.executable)
+print("Python prefix:      ", sys.prefix)
+print()
+print("PyTorch:            ", torch.__version__)
+print("PyTorch path:       ", torch.__file__)
+print("PyTorch CUDA:       ", torch.version.cuda)
+print()
+print("User site enabled:  ", site.ENABLE_USER_SITE)
+
+if sys.prefix != "/opt/comfyui-venv":
+    raise RuntimeError(
+        f"Unexpected Python environment: {sys.prefix}"
+    )
+
+if torch.version.cuda is None:
+    raise RuntimeError(
+        "CUDA-enabled PyTorch is not available."
+    )
+
+if site.ENABLE_USER_SITE:
+    raise RuntimeError(
+        "Python user-site packages are unexpectedly enabled."
+    )
+PYTHON_EOF
+
+
+# =============================================================================
+# PyTorch metadata visibility
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " PyTorch package visibility"
+echo "======================================================================"
+echo
+
+python -m pip show torch || true
+
+echo
+
+python - <<'PYTHON_EOF'
+from importlib.metadata import distribution
+
+for package in [
+    "torch",
+    "torchvision",
+    "torchaudio",
+]:
+    try:
+        dist = distribution(package)
+        print(
+            f"{package}: "
+            f"{dist.version} "
+            f"({dist.locate_file('')})"
+        )
+    except Exception as exc:
+        print(
+            f"{package}: metadata detection failed: "
+            f"{exc!r}"
+        )
+PYTHON_EOF
+
+
+# =============================================================================
+# GPU validation
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " GPU"
+echo "======================================================================"
+echo
+
+python - <<'PYTHON_EOF'
+import torch
+
+available = torch.cuda.is_available()
+
+print("CUDA available: ", available)
+
+if not available:
+    raise RuntimeError(
+        "CUDA is not available inside the container."
+    )
+
+print(
+    "GPU:            ",
+    torch.cuda.get_device_name(0)
+)
+
+print(
+    "Capability:     ",
+    torch.cuda.get_device_capability(0)
+)
+
+properties = torch.cuda.get_device_properties(0)
+vram = properties.total_memory / (1024 ** 3)
+
+print(
+    "VRAM:           ",
+    f"{vram:.2f} GB"
+)
+PYTHON_EOF
+
+
+# =============================================================================
+# Overlay validation
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " Writable overlay"
+echo "======================================================================"
+echo
+
+OVERLAY_TEST="/app/.comfyui_overlay_test_$$"
+
+if ! touch "${OVERLAY_TEST}"; then
+    echo
+    echo "ERROR: The Singularity overlay is not writable."
+    exit 1
+fi
+
+rm -f "${OVERLAY_TEST}"
+
+echo "OK: overlay is writable"
+echo
+
+# Custom nodes and their Python dependencies both land in the overlay, so
+# this is the number that determines whether further installs will succeed.
+
+df -h /app 2>/dev/null || true
+
+OVERLAY_USED_PCT="$(
+    df --output=pcent /app 2>/dev/null \
+        | tail -n 1 \
+        | tr -dc '0-9' \
+        || true
+)"
+
+if [[ -n "${OVERLAY_USED_PCT}" && "${OVERLAY_USED_PCT}" -ge 90 ]]; then
+    echo
+    echo "WARNING:"
+    echo "The custom-node environment is ${OVERLAY_USED_PCT}% full."
+    echo "Installing further nodes is likely to fail with a disk-space error."
+    echo "Uninstall nodes you no longer need from the Manager, or ask HPC"
+    echo "support to reset the overlay image listed above."
+fi
+
+
+# =============================================================================
+# custom_nodes validation
+# =============================================================================
+
+CUSTOM_NODE_TEST="/app/custom_nodes/.comfyui_write_test_$$"
+
+if ! touch "${CUSTOM_NODE_TEST}"; then
+    echo
+    echo "ERROR:"
+    echo "/app/custom_nodes is not writable."
+    echo "ComfyUI Manager cannot install custom nodes."
+    exit 1
+fi
+
+rm -f "${CUSTOM_NODE_TEST}"
+
+echo "OK: /app/custom_nodes is writable"
+
+
+# =============================================================================
+# Python environment write validation
+# =============================================================================
+
+VENV_SITE="$(
+python - <<'PYTHON_EOF'
+import site
+
+paths = [
+    path
+    for path in site.getsitepackages()
+    if path.startswith("/opt/comfyui-venv/")
+]
+
+if not paths:
+    raise RuntimeError(
+        "Unable to locate /opt/comfyui-venv site-packages"
+    )
+
+print(paths[0])
+PYTHON_EOF
+)"
+
+echo
+echo "Venv site-packages:"
+echo "${VENV_SITE}"
+
+VENV_TEST="${VENV_SITE}/.comfyui_write_test_$$"
+
+if ! touch "${VENV_TEST}"; then
+    echo
+    echo "ERROR:"
+    echo "Python environment is not writable:"
+    echo "  ${VENV_SITE}"
+    echo "Manager will not be able to install custom-node dependencies."
+    exit 1
+fi
+
+rm -f "${VENV_TEST}"
+
+echo "OK: Python venv is writable"
+
+
+# =============================================================================
+# Storage validation
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " Storage"
+echo "======================================================================"
+echo
+
+for directory in \
+    /app/user \
+    /app/input \
+    /app/output \
+    /app/temp \
+    /app/user_models
+
+do
+    if [[ ! -d "${directory}" ]]; then
+        echo
+        echo "ERROR: Missing directory:"
+        echo "  ${directory}"
+        exit 1
+    fi
+
+    TEST_FILE="${directory}/.comfyui_write_test_$$"
+
+    if ! touch "${TEST_FILE}"; then
+        echo
+        echo "ERROR: Directory is not writable:"
+        echo "  ${directory}"
+        exit 1
+    fi
+
+    rm -f "${TEST_FILE}"
+
+    echo "OK: ${directory}"
+done
+
+
+if [[ ! -d /app/models ]]; then
+    echo
+    echo "ERROR:"
+    echo "/app/models does not exist."
+    exit 1
+fi
+
+echo "OK: /app/models (shared, read-only)"
+echo "OK: /app/user_models (per-user, writable)"
+
+
+# =============================================================================
+# Manager configuration inside container
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " Manager configuration inside container"
+echo "======================================================================"
+echo
+
+# The policy is written to both known Manager config locations. Which one
+# is authoritative depends on the Manager version in this image; ComfyUI
+# prints the path it loaded during startup below.
+
+FOUND_MANAGER_CONFIG=0
+
+for MANAGER_CONFIG in \
+    /app/user/__manager/config.ini \
+    /app/user/default/ComfyUI-Manager/config.ini
+
+do
+    if [[ ! -f "${MANAGER_CONFIG}" ]]; then
+        continue
+    fi
+
+    FOUND_MANAGER_CONFIG=1
+
+    echo "${MANAGER_CONFIG}"
+
+    grep -E \
+        '^(use_uv|use_unified_resolver|verbose|security_level|network_mode|allow_git_url_install|allow_pip_install)[[:space:]]*=' \
+        "${MANAGER_CONFIG}" \
+        | sed 's/^/  /' || true
+
+    echo
+done
+
+if [[ "${FOUND_MANAGER_CONFIG}" -eq 0 ]]; then
+    echo "ERROR: no Manager config visible under /app/user."
+    exit 1
+fi
+
+echo "Manager reports the config it loaded in the startup log below."
+
+
+# =============================================================================
+# PyOpenGL diagnostics
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " PyOpenGL"
+echo "======================================================================"
+echo
+
+python - <<'PYTHON_EOF'
+import OpenGL
+
+print(
+    "PyOpenGL:",
+    OpenGL.__version__
+)
+
+try:
+    import OpenGL_accelerate
+
+    print(
+        "OpenGL_accelerate module:",
+        OpenGL_accelerate.__file__
+    )
+
+    try:
+        from OpenGL_accelerate import errorchecker
+
+        print(
+            "OpenGL acceleration: OK"
+        )
+
+    except Exception as exc:
+        print("WARNING:")
+        print(
+            "OpenGL_accelerate is installed, "
+            "but acceleration could not be enabled."
+        )
+        print(repr(exc))
+
+except Exception as exc:
+    print("WARNING:")
+    print("OpenGL_accelerate import failed.")
+    print(repr(exc))
+PYTHON_EOF
+
+
+# =============================================================================
+# SageAttention diagnostics
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " SageAttention"
+echo "======================================================================"
+echo
+
+python - <<'PYTHON_EOF'
+try:
+    import sageattention
+    from importlib.metadata import version
+
+    print(
+        "Version:",
+        version("sageattention")
+    )
+
+    print(
+        "Path:",
+        sageattention.__file__
+    )
+
+except Exception as exc:
+    print(
+        "WARNING: SageAttention unavailable:"
+    )
+    print(repr(exc))
+PYTHON_EOF
+
+
+# =============================================================================
+# Dependency consistency
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " Python dependency status"
+echo "======================================================================"
+echo
+
+if ! python -m pip check; then
+    echo
+    echo "WARNING:"
+    echo "pip detected dependency conflicts."
+    echo "A custom node may have modified the per-user Python environment."
+    echo
+fi
+
+
+# =============================================================================
+# Existing custom nodes
+# =============================================================================
+
+echo
+echo "======================================================================"
+echo " Custom nodes"
+echo "======================================================================"
+echo
+
+if [[ -d /app/custom_nodes ]]; then
+    find /app/custom_nodes \
+        -mindepth 1 \
+        -maxdepth 1 \
+        -printf '%f\n' \
+        2>/dev/null \
+        | sort || true
+fi
+
+
+# =============================================================================
+# Start ComfyUI
+# =============================================================================
+
+cd /app
+
+echo
+echo "======================================================================"
+echo " Starting ComfyUI"
+echo "======================================================================"
+echo
+echo "Port:    ${COMFYUI_PORT}"
+echo "Manager: enabled"
+echo
+
+
+# =============================================================================
+# Additional OOD parameters
+# =============================================================================
+
+# shellcheck disable=SC2206
+EXTRA_ARGS=( ${EXTRA_PARAMETERS} )
+
+
+# =============================================================================
+# Launch
+# =============================================================================
+
+exec python main.py \
+    --listen 0.0.0.0 \
+    --extra-model-paths-config /app/user/extra_model_paths.yaml \
+    --port "${COMFYUI_PORT}" \
+    --enable-manager \
+    "${EXTRA_ARGS[@]}"
+
+CONTAINER_EOF
+
+
+# =============================================================================
+# Cleanup
+# =============================================================================
+
+# TEMP_DIR and the overlay lock are both released by the EXIT trap, which
+# also covers the job hitting its Slurm time limit.
+
+echo
+echo "ComfyUI session finished."
