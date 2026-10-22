@@ -42,6 +42,7 @@ attributes:
     label: Version
     widget: select
     options:
+         - ["0.37.4"]
          - ["0.27.0"]
          - ["0.19.0"]
          - ["0.12.2"]
@@ -59,7 +60,15 @@ attributes:
     label: "DATA_DIR"
     widget: path_selector
     directory: /cluster/tufts
-    help: "Specifies the base directory for storing data such as uploads, cache, and vector database files. If left unset, it defaults to **${HOME}/comfyui/data**."
+    help: |
+      Base directory for your ComfyUI session data. Everything is stored under
+      **DATA_DIR/comfyui/&lt;version&gt;/**: your workflows, inputs, outputs, and the
+      writable image holding the custom nodes you install. If left unset, it
+      defaults to your home directory, giving **${HOME}/comfyui/&lt;version&gt;**.
+
+      Note that this path is *per version*. Selecting a different ComfyUI
+      version above gives you a separate, empty environment — custom nodes and
+      workflows are not carried across versions.
     favorites:
       - /cluster/tufts
       - /cluster/home
