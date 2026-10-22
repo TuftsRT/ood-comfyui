@@ -26,7 +26,9 @@ script:
   gres_name = gpu_type.to_s.split('-', 2).first.to_s
   skip_gres = gres_name.empty? || gres_name == "none"
 %>
-<% unless skip_gres %>
+<% if gres_name == "any" %>
+    - "--gres=gpu:1"
+<% elsif !skip_gres %>
     - "--gres=gpu:<%= gres_name %>:1"
   <% if gpu_type.include?('-') %>
     - "--constraint=<%= gpu_type %>"
