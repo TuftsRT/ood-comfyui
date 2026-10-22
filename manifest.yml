@@ -1,5 +1,5 @@
 ---
-name: "ComfyUI-dev"
+name: "ComfyUI"
 category: "Interactive Apps"
 subcategory: "AI"
 role: "batch_connect"
