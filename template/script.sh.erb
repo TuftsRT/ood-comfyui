@@ -311,11 +311,6 @@ fi
 
 
 # Force important values even if Manager has modified config.ini.
-#
-# network_mode accepts only public, private or offline. Anything else is
-# read without complaint and then matches neither branch in Manager, which
-# leaves the node registry fetch non-blocking and can present an empty node
-# catalogue on a cold cache.
 
 set_manager_option "${MANAGER_CONFIG}" "use_uv" "False"
 set_manager_option "${MANAGER_CONFIG}" "use_unified_resolver" "False"
@@ -354,7 +349,7 @@ echo
 # Manager loads - watch the ComfyUI startup log for that.
 
 if ! grep -qE \
-    '^network_mode[[:space:]]*=[[:space:]]*public[[:space:]]*$' \
+    '^network_mode[[:space:]]*=[[:space:]]*personal_cloud[[:space:]]*$' \
     "${MANAGER_CONFIG}"; then
 
     echo "ERROR: Failed to write network_mode into:"
